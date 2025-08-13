@@ -3,118 +3,144 @@ package EtherHack.Ether;
 import EtherHack.utils.Logger;
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileReader;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import se.krka.kahlua.vm.KahluaTable;
 import se.krka.kahlua.vm.KahluaTableIterator;
 import zombie.core.Translator;
 
+/**
+ * 处理翻译功能的核心类
+ * 负责加载指定目录下的翻译文件（.txt格式），并提供根据键获取翻译文本的方法
+ */
 public class EtherTranslator {
+   /** 翻译文件存储路径（相对于游戏根目录） */
    private static final String TRANSLATIONS_PATH = "EtherHack/translations";
-   private Map translations;
+   /** 翻译内容存储容器：键为语言代码（如"ZH"、"EN"），值为该语言的键值对映射 */
+   private Map<String, Map<String, String>> translations;
 
+   /**
+    * 构造方法：初始化翻译器
+    */
    public EtherTranslator() {
       Logger.printLog("Initializing EtherTranslator...");
-      this.translations = new HashMap();
+      this.translations = new HashMap<>();
    }
 
+   /**
+    * 加载所有翻译文件（.txt格式）
+    * 会遍历TRANSLATIONS_PATH目录下的所有txt文件，解析其中的"键=值"对
+    */
    public void loadTranslations() {
-      File var1 = new File("EtherHack/translations");
-      File[] var2 = var1.listFiles(EtherTranslator::lambda$loadTranslations$0);
-      if (var2 == null) {
+      File translationsDir = new File(TRANSLATIONS_PATH);
+      File[] translationFiles = translationsDir.listFiles(EtherTranslator::lambda$loadTranslations$0);
+
+      if (translationFiles == null) {
          Logger.printLog("Failed to load translations: no files found.");
-      } else {
-         File[] var3 = var2;
-         int var4 = var2.length;
-
-         for(int var5 = 0; var5 < var4; ++var5) {
-            File var6 = var3[var5];
-            String var7 = var6.getName().replace(".txt", "");
-            HashMap var8 = new HashMap();
-
-            try {
-               BufferedReader var9 = new BufferedReader(new FileReader(var6));
-
-               String var10;
-               try {
-                  while((var10 = var9.readLine()) != null) {
-                     if (!var10.trim().isEmpty() && var10.contains("=")) {
-                        String[] var11 = var10.split("=", 2);
-                        if (var11.length >= 2) {
-                           String var12 = var11[0].trim();
-                           String var13 = var11[1].trim();
-                           if (var13.endsWith(",")) {
-                              var13 = var13.substring(0, var13.length() - 1);
-                           }
-
-                           var13 = var13.replaceAll("\"", "");
-                           var8.put(var12, var13);
-                        }
-                     }
-                  }
-               } catch (Throwable var15) {
-                  try {
-                     var9.close();
-                  } catch (Throwable var14) {
-                     var15.addSuppressed(var14);
-                  }
-
-                  throw var15;
-               }
-
-               var9.close();
-            } catch (Exception var16) {
-               Logger.printLog("Failed to load translation file: " + var6.getName());
-               var16.printStackTrace();
-            }
-
-            this.translations.put(var7, var8);
-         }
+         return;
       }
 
+      for (File file : translationFiles) {
+         // 提取语言代码（文件名去掉.txt后缀）
+         String langCode = file.getName().replace(".txt", "");
+         Map<String, String> langTranslations = new HashMap<>();
+
+         try (BufferedReader reader = new BufferedReader(
+                 new InputStreamReader(
+                         new FileInputStream(file),
+                         StandardCharsets.UTF_8 // 显式指定UTF-8编码读取
+                 ))) {
+
+            String line;
+            while ((line = reader.readLine()) != null) {
+               // 跳过空行和不含等号的行
+               if (line.trim().isEmpty() || !line.contains("=")) continue;
+
+               // 按第一个等号分割键值对（支持值中包含等号）
+               String[] parts = line.split("=", 2);
+               if (parts.length < 2) continue;
+
+               String key = parts[0].trim();
+               String value = parts[1].trim();
+
+               // 清理值中的多余符号（末尾逗号、双引号）
+               if (value.endsWith(",")) {
+                  value = value.substring(0, value.length() - 1);
+               }
+               value = value.replaceAll("\"", "");
+
+               langTranslations.put(key, value);
+            }
+         } catch (IOException e) {
+            Logger.printLog("Failed to load translation file: " + file.getName());
+            e.printStackTrace();
+         }
+
+         translations.put(langCode, langTranslations);
+      }
    }
 
-   public String getTranslate(String var1) {
-      return this.getTranslate(var1, (KahluaTable)null);
+   /**
+    * 根据键获取翻译文本（无变量替换）
+    * @param key 翻译键
+    * @return 翻译文本（无翻译时返回原键）
+    */
+   public String getTranslate(String key) {
+      return getTranslate(key, null);
    }
 
-   public String getTranslate(String var1, KahluaTable var2) {
-      if (var1 == null) {
+   /**
+    * 根据键获取翻译文本（支持变量替换）
+    * @param key 翻译键
+    * @param variables 变量表（键值对用于替换翻译文本中的{变量名}）
+    * @return 翻译文本（无翻译时返回原键）
+    */
+   public String getTranslate(String key, KahluaTable variables) {
+      if (key == null) {
          Logger.printLog("The translation key value was not obtained!");
          return "???";
-      } else {
-         String var3 = Translator.getLanguage().name();
-         Map var4 = (Map)this.translations.get(var3);
-         if (var4 == null) {
-            Logger.printLog("No translations for language code: " + var3);
-            var4 = (Map)this.translations.get("EN");
-            if (var4 == null) {
-               return var1;
-            }
-         }
+      }
 
-         String var5 = (String)var4.get(var1);
-         if (var5 == null) {
-            Logger.printLog("No translation for key: " + var1 + " for language: " + var3);
-            return var1;
-         } else {
-            String var6;
-            String var7;
-            if (var2 != null && !var2.isEmpty()) {
-               for(KahluaTableIterator var8 = var2.iterator(); var8.advance(); var5 = var5.replace("{" + var6 + "}", var7)) {
-                  var6 = var8.getKey().toString();
-                  var7 = var8.getValue().toString();
-               }
-            }
+      // 获取当前游戏语言代码（如"ZH"、"EN"）
+      String currentLang = Translator.getLanguage().name();
+      Map<String, String> currentTranslations = translations.get(currentLang);
 
-            var5 = var5.replace("<br>", "\n");
-            return var5;
+      // 语言无翻译时回退到英文
+      if (currentTranslations == null) {
+         Logger.printLog("No translations for language code: " + currentLang);
+         currentTranslations = translations.get("EN");
+         if (currentTranslations == null) return key;
+      }
+
+      String translatedText = currentTranslations.get(key);
+      if (translatedText == null) {
+         Logger.printLog("No translation for key: " + key + " for language: " + currentLang);
+         return key;
+      }
+
+      // 变量替换（如翻译文本中有{name}，用variables中的对应值替换）
+      if (variables != null && !variables.isEmpty()) {
+         KahluaTableIterator iterator = variables.iterator();
+         while (iterator.advance()) {
+            String varKey = iterator.getKey().toString();
+            String varValue = iterator.getValue().toString();
+            translatedText = translatedText.replace("{" + varKey + "}", varValue);
          }
       }
+
+      // 替换HTML换行符为实际换行
+      translatedText = translatedText.replace("<br>", "\n");
+      return translatedText;
    }
 
-   private static boolean lambda$loadTranslations$0(File var0, String var1) {
-      return var1.endsWith(".txt");
+   /**
+    * 文件过滤器：仅保留.txt后缀的文件
+    */
+   private static boolean lambda$loadTranslations$0(File dir, String name) {
+      return name.endsWith(".txt");
    }
 }
