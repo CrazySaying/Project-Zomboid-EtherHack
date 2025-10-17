@@ -1,69 +1,47 @@
-name: Auto Release on Changes
+name: Auto Build and Release
 
 on:
   push:
-    branches: [ "master", "main" ]
-  workflow_dispatch:  # 允许手动触发
+    branches: [ master, main ] # 当推送到 master 或 main 分支时触发
 
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+    # 需要授予发布 Release 的权限
     permissions:
-      contents: write  # 需要写入权限来创建 release
-    
+      contents: write
+
     steps:
+    # 1. 获取代码
     - name: Checkout code
       uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-    
+
+    # 2. 设置 Java 环境
     - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
         java-version: '17'
         distribution: 'temurin'
 
+    # 3. 设置 Gradle（假设项目使用 Gradle）
     - name: Setup Gradle
-      uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582
+      uses: gradle/actions/setup-gradle@v4
 
+    # 4. 执行构建（编译、测试、打包）
     - name: Build with Gradle
       run: ./gradlew build
 
-    - name: Run tests
-      run: ./gradlew test
-
-    - name: Generate Version Number
-      id: version
-      run: |
-        # 基于时间戳和提交SHA生成唯一版本号
-        TIMESTAMP=$(date +%Y%m%d%H%M%S)
-        SHORT_SHA=${GITHUB_SHA:0:8}
-        VERSION="auto-${TIMESTAMP}-${SHORT_SHA}"
-        echo "version=${VERSION}" >> $GITHUB_OUTPUT
-        echo "Generated version: ${VERSION}"
-
-    - name: Create GitHub Release
+    # 5. 发布到 GitHub Release (示例使用 softprops/action-gh-release)
+    - name: Create GitHub Release and Upload Asset
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: ${{ steps.version.outputs.version }}
-        name: Auto Release ${{ steps.version.outputs.version }}
-        body: |
-          ## 自动发布
-          
-          触发提交: ${{ github.sha }}
-          触发时间: ${{ fromJSON(format('"{0}"', toJSON(github.event.head_commit.timestamp))) }}
-          提交信息: ${{ github.event.head_commit.message }}
-          
-          本次构建包含以下变更:
-          - 自动版本号: ${{ steps.version.outputs.version }}
-          - 构建时间: $(date -u)
-          
-          构建产物已包含在本次发布中。
+        # 使用提交SHA和时间戳生成唯一标签，避免重复
+        tag_name: auto-build-${{ github.sha }}-${{ github.run_id }}
+        name: Automatic Build for ${{ github.sha }}
         draft: false
-        prerelease: false
+        prerelease: true # 因为是自动构建，通常标记为预发布
+        # 指定要上传的构建产物，根据你的项目构建输出调整路径
         files: |
           build/libs/*.jar
-          build/libs/*.war
-        generate_release_notes: true
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 使用 GitHub 提供的令牌
