@@ -1,73 +1,19 @@
-name: Java CI with Gradle and Auto Release
+name: Auto Release on Changes
 
 on:
   push:
-    branches: [ "master" ]
-    tags: [ "v*" ]
-  pull_request:
-    branches: [ "master" ]
+    branches: [ "master", "main" ]
+  workflow_dispatch:  # 允许手动触发
 
 jobs:
-  build:
+  build-and-release:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # 获取所有历史用于版本号生成
-    
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-
-    - name: Setup Gradle
-      uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582
-
-    - name: Build with Gradle Wrapper
-      run: ./gradlew build
-
-    - name: Run tests
-      run: ./gradlew test
-
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: package
-        path: build/libs/
-        retention-days: 7
-
-  dependency-submission:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-    - uses: actions/checkout@v4
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-
-    - name: Generate and submit dependency graph
-      uses: gradle/actions/dependency-submission@af1da67850ed9a4cedd57bfd976089dd991e2582
-
-  release:
-    needs: [build, dependency-submission]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      packages: write
-    
-    # 只在打标签时创建 release，或者手动触发
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+      contents: write  # 需要写入权限来创建 release
     
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
       with:
         fetch-depth: 0
     
@@ -80,48 +26,44 @@ jobs:
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582
 
-    - name: Build release artifacts
-      run: ./gradlew build -x test
+    - name: Build with Gradle
+      run: ./gradlew build
 
-    - name: Create Release
+    - name: Run tests
+      run: ./gradlew test
+
+    - name: Generate Version Number
+      id: version
+      run: |
+        # 基于时间戳和提交SHA生成唯一版本号
+        TIMESTAMP=$(date +%Y%m%d%H%M%S)
+        SHORT_SHA=${GITHUB_SHA:0:8}
+        VERSION="auto-${TIMESTAMP}-${SHORT_SHA}"
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+        echo "Generated version: ${VERSION}"
+
+    - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
+        tag_name: ${{ steps.version.outputs.version }}
+        name: Auto Release ${{ steps.version.outputs.version }}
+        body: |
+          ## 自动发布
+          
+          触发提交: ${{ github.sha }}
+          触发时间: ${{ fromJSON(format('"{0}"', toJSON(github.event.head_commit.timestamp))) }}
+          提交信息: ${{ github.event.head_commit.message }}
+          
+          本次构建包含以下变更:
+          - 自动版本号: ${{ steps.version.outputs.version }}
+          - 构建时间: $(date -u)
+          
+          构建产物已包含在本次发布中。
+        draft: false
+        prerelease: false
         files: |
           build/libs/*.jar
           build/libs/*.war
         generate_release_notes: true
-        draft: false
-        prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  publish:
-    needs: [build, dependency-submission]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    
-    # 只在 master 分支推送时发布到 GitHub Packages
-    if: github.ref == 'refs/heads/master'
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        server-id: github
-        server-username: GITHUB_ACTOR
-        server-password: GITHUB_TOKEN
-
-    - name: Setup Gradle
-      uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582
-
-    - name: Publish to GitHub Packages
-      run: ./gradlew publish
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GITHUB_ACTOR: ${{ github.actor }}
